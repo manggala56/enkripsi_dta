@@ -4,107 +4,128 @@ import rsa_engine
 import encryption
 import decryption
 
-st.set_page_config(page_title="Hybrid E2EE Chat Engine", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="P2P Encrypted Messaging", layout="wide")
 
 database.init_db()
 
 for user in ["Alice", "Bob"]:
     if not database.get_user_keys(user):
-        with st.spinner(f"Membuat pasangan kunci RSA 512-bit untuk {user}..."):
-            pub, priv = rsa_engine.generate_keypair(bits=256)
-            database.save_user(user, pub, priv)
+        pub, priv = rsa_engine.generate_keypair(bits=256)
+        database.save_user(user, pub, priv)
 
 alice_keys = database.get_user_keys("Alice")
 bob_keys = database.get_user_keys("Bob")
 
-# Sidebar
+
 with st.sidebar:
-    st.header("🔑 Manajemen Identitas & Kunci")
-    st.write("**Alice Public Modulus ($n$):**")
-    st.code(str(alice_keys["public"][1])[:36] + "...", language="text")
-
-    st.write("**Bob Public Modulus ($n$):**")
-    st.code(str(bob_keys["public"][1])[:36] + "...", language="text")
-
-    st.divider()
-    if st.button("🗑️ Reset Chat & Database JSON"):
+    st.subheader("Kontrol Sistem")
+    if st.button("Reset Database"):
         database.clear_db()
-        # Regenerasi kunci
         for user in ["Alice", "Bob"]:
             pub, priv = rsa_engine.generate_keypair(bits=256)
             database.save_user(user, pub, priv)
-        st.success("Database di-reset!")
         st.rerun()
 
-st.title("🛡️ Hybrid E2EE Encrypted Messenger")
-st.caption("Arsitektur Modular: Asimetris RSA (Kunci Sesi) + Simetris ChaCha20 (Pesan Teks) + Persistensi JSON")
+col_alice, col_network, col_bob = st.columns([1, 1.2, 1])
+messages = database.get_all_messages()
 
-col_chat, col_inspect = st.columns([1.2, 1])
 
-# Sisi Kiri: Tampilan Obrolan
-with col_chat:
-    st.subheader("💬 Antarmuka Chat")
-    chat_box = st.container(height=420)
+with col_alice:
+    st.subheader("Klien Alice")
+    alice_box = st.container(height=420)
     
-    messages = database.get_all_messages()
-    with chat_box:
+    with alice_box:
         if not messages:
-            st.info("Belum ada riwayat pesan di database.json. Silakan mulai obrolan.")
+            st.caption("Belum ada pesan.")
         for msg in messages:
             sender = msg["sender"]
             receiver = msg["receiver"]
             
-            # Dekripsi dinamis berdasarkan kunci privat penerima
-            rec_priv = alice_keys["private"] if receiver == "Alice" else bob_keys["private"]
-            try:
-                decrypted_text = decryption.decrypt_message(msg["payload"], rec_priv)
-            except Exception as e:
-                decrypted_text = f"[Dekripsi Gagal: {e}]"
-            
-            with st.chat_message(sender.lower()):
-                st.write(f"**{sender}** ➔ **{receiver}**")
-                st.write(decrypted_text)
+          
+            if receiver == "Alice":
+                try:
+                    text_display = decryption.decrypt_message(msg["payload"], alice_keys["private"])
+                except Exception:
+                    text_display = "[Gagal dekripsi]"
+            else:
+      
+                text_display = msg.get("plaintext_alice_sent", "[Pesan terkirim]")
 
-    # Input Form
-    with st.form("send_form", clear_on_submit=True):
-        c1, c2 = st.columns([1, 3])
-        with c1:
-            active_sender = st.selectbox("Pengirim:", ["Alice", "Bob"])
-        with c2:
-            pesan_input = st.text_input("Tulis pesan rahasia:")
+            align = "Pengirim (Anda)" if sender == "Alice" else "Bob"
+            st.markdown(f"**{align}:** {text_display}")
 
-        btn_kirim = st.form_submit_button("🔒 Enkripsi & Simpan ke DB")
+    with st.form("alice_form", clear_on_submit=True):
+        alice_text = st.text_input("Pesan ke Bob:", key="input_alice")
+        submit_alice = st.form_submit_button("Kirim ke Bob")
+        if submit_alice and alice_text.strip():
+            # Alice enkripsi pakai public key Bob
+            payload = encryption.encrypt_message(alice_text, bob_keys["public"])
 
-        if btn_kirim and pesan_input.strip():
-            active_receiver = "Bob" if active_sender == "Alice" else "Alice"
-            rec_pub = bob_keys["public"] if active_receiver == "Bob" else alice_keys["public"]
-            
-            # 1. Enkripsi pesan
-            payload = encryption.encrypt_message(pesan_input, rec_pub)
-            
-            # 2. Simpan hanya ciphertext & encrypted key ke database.json
-            database.append_message(active_sender, active_receiver, payload)
-            
+            msg_record = {
+                "sender": "Alice",
+                "receiver": "Bob",
+                "payload": payload,
+                "plaintext_alice_sent": alice_text
+            }
+            db_data = database.load_db()
+            db_data["messages"].append(msg_record)
+            database.save_db(db_data)
             st.rerun()
 
-# Sisi Kanan: Inspeksi Payload Transmisi (Data di database.json)
-with col_inspect:
-    st.subheader("📦 Inspeksi Data Jaringan & DB")
-    st.caption("File `database.json` hanya menyimpan struktur terenkripsi berikut:")
 
-    if messages:
-        latest = messages[-1]
-        st.write(f"**Paket Terakhir ({latest['sender']} ➔ {latest['receiver']}):**")
-        st.json(latest["payload"])
+with col_network:
+    st.subheader("Lalu Lintas Jaringan / Payload")
+    st.caption("Representasi data mentah yang melintas antar simpul:")
+    
+    network_box = st.container(height=500)
+    with network_box:
+        if messages:
+            for idx, msg in enumerate(reversed(messages)):
+                st.text(f"Paket #{len(messages) - idx}: {msg['sender']} -> {msg['receiver']}")
+                st.json(msg["payload"])
+                st.markdown("---")
+        else:
+            st.caption("Menunggu transmisi data...")
 
-        with st.expander("🔬 Analisis Keamanan Hybrid", expanded=True):
-            st.markdown(f"""
-            - **Asymmetric Layer (RSA-512):**
-              `enc_session_key` bernilai bilangan integer besar. Hanya pemegang private exponent ($d$) milik penerima yang bisa menghitung $m = c^d \pmod n$ untuk memperoleh 32-byte session key.
-            - **Symmetric Layer (ChaCha20):**
-              Teks pesan dienkripsi secara stream menggunakan kunci 256-bit dan nonce 96-bit, mencegah serangan statistik frekuensi.
-            - **Zero Plaintext Storage:**
-              Teks asli sama sekali tidak disimpan di file `database.json`.
-            """)
-    else:
-        st.info("Kirim pesan untuk melihat analisis payload.")
+with col_bob:
+    st.subheader("Klien Bob")
+    bob_box = st.container(height=420)
+    
+    with bob_box:
+        if not messages:
+            st.caption("Belum ada pesan.")
+        for msg in messages:
+            sender = msg["sender"]
+            receiver = msg["receiver"]
+            
+
+            if receiver == "Bob":
+                try:
+                    text_display = decryption.decrypt_message(msg["payload"], bob_keys["private"])
+                except Exception:
+                    text_display = "[Gagal dekripsi]"
+            else:
+         
+                text_display = msg.get("plaintext_bob_sent", "[Pesan terkirim]")
+
+            align = "Pengirim (Anda)" if sender == "Bob" else "Alice"
+            st.markdown(f"**{align}:** {text_display}")
+
+    with st.form("bob_form", clear_on_submit=True):
+        bob_text = st.text_input("Pesan ke Alice:", key="input_bob")
+        submit_bob = st.form_submit_button("Kirim ke Alice")
+        if submit_bob and bob_text.strip():
+            # Bob enkripsi pakai public key Alice
+            payload = encryption.encrypt_message(bob_text, alice_keys["public"])
+            
+   
+            msg_record = {
+                "sender": "Bob",
+                "receiver": "Alice",
+                "payload": payload,
+                "plaintext_bob_sent": bob_text
+            }
+            db_data = database.load_db()
+            db_data["messages"].append(msg_record)
+            database.save_db(db_data)
+            st.rerun()
