@@ -250,7 +250,7 @@ with col_bob:
 st.markdown("---")
 b1, b2 = st.columns([4, 1])
 with b1:
-    st.caption("Protokol Hybrid Cryptography: ChaCha20 (Payload Stream) + RSA-256 (Pertukaran Kunci)")
+    st.caption("Protokol Cryptography: ChaCha20 dan RSA-256")
 with b2:
     if st.button("Hapus Riwayat Chat", use_container_width=True):
         database.clear_db()
