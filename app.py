@@ -5,7 +5,7 @@ import encryption
 import decryption
 
 st.set_page_config(
-    page_title="P2P Hybrid Cryptosystem",
+    page_title="Cryptosystem",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
