@@ -6,7 +6,6 @@ import decryption
 
 st.set_page_config(page_title="Hybrid E2EE Chat Engine", page_icon="🛡️", layout="wide")
 
-# Inisialisasi Database JSON & Keypair Akun Demo jika belum ada
 database.init_db()
 
 for user in ["Alice", "Bob"]:
